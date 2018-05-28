@@ -1,0 +1,12 @@
+[package]
+name = "cosmos"
+version = "0.1.0"
+authors = ["Miguel Molina <miguel@erizocosmi.co>"]
+
+[dependencies]
+bcrypt = "0.2.0"
+dotenv = "0.9.0"
+chrono = "0.4.2"
+actix = "0.5.7"
+uuid = "0.6.5"
+diesel = { version = "1.3.0", features = ["postgres", "chrono", "uuid"] }
