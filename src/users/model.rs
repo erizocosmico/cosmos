@@ -19,8 +19,8 @@ pub enum Error {
 pub struct User {
     pub id: Uuid,
     pub username: String,
-    pub email: String,
     pub password: String,
+    pub email: String,
     pub active: bool,
 }
 
@@ -42,7 +42,19 @@ pub fn create_user(
 
     insert_into(users::table)
         .values(&user)
-        .get_result(conn)
+        .get_result::<User>(conn)
+        .map_err(|err| Error::QueryError(err))
+}
+
+pub fn get_by_username_or_email(
+    conn: &PgConnection,
+    username: String,
+    email: String,
+) -> Result<Vec<User>, Error> {
+    users::table
+        .filter(users::username.eq(&username))
+        .or_filter(users::email.eq(&email))
+        .load::<User>(conn)
         .map_err(|err| Error::QueryError(err))
 }
 
@@ -51,24 +63,28 @@ pub fn get_by_login_details(
     username_or_email: String,
     raw_password: String,
 ) -> Result<User, Error> {
-    users::table
-        .filter(users::username.eq(&username_or_email))
-        .or_filter(users::email.eq(&username_or_email))
-        .first::<User>(conn)
-        .map_err(|err| Error::QueryError(err))
-        .and_then(|user| match verify(&raw_password, &user.password) {
-            Ok(ok) => if ok {
-                Ok(user)
-            } else {
-                Err(Error::Msg("invalid username or password".into()))
-            },
-            Err(err) => Err(Error::BcryptError(err)),
-        })
+    get_by_username_or_email(conn, username_or_email.clone(), username_or_email.clone()).and_then(
+        |mut users| {
+            if users.len() == 0 {
+                return Err(Error::Msg("invalid login details".into()));
+            }
+
+            let user = users.drain(0..1).next().unwrap();
+            match verify(&raw_password, &user.password) {
+                Ok(ok) => if ok {
+                    Ok(user)
+                } else {
+                    Err(Error::Msg("invalid login details".into()))
+                },
+                Err(err) => Err(Error::BcryptError(err)),
+            }
+        },
+    )
 }
 
 pub fn update_user(
     conn: &PgConnection,
-    user: User,
+    user: &User,
     email: Option<String>,
     password: Option<String>,
 ) -> Result<usize, Error> {
@@ -78,16 +94,14 @@ pub fn update_user(
         None => user.password.clone(),
     };
 
-    update(&user)
+    update(user)
         .set((users::email.eq(email), users::password.eq(password)))
         .execute(conn)
         .map_err(|e| Error::QueryError(e))
 }
 
-pub fn delete_user(conn: &PgConnection, user: User) -> Result<usize, Error> {
-    delete(&user)
-        .execute(conn)
-        .map_err(|e| Error::QueryError(e))
+pub fn delete_user(conn: &PgConnection, user: &User) -> Result<usize, Error> {
+    delete(user).execute(conn).map_err(|e| Error::QueryError(e))
 }
 
 #[derive(Debug, Queryable, Insertable)]
@@ -98,7 +112,7 @@ pub struct UserSession {
     pub expires_at: DateTime<Utc>,
 }
 
-pub fn create_session(conn: &PgConnection, user: User) -> Result<UserSession, Error> {
+pub fn create_session(conn: &PgConnection, user: &User) -> Result<UserSession, Error> {
     let session = UserSession {
         id: Uuid::new_v4(),
         token: Uuid::new_v4(),
